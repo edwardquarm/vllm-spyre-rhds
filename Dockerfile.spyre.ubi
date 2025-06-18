@@ -54,7 +54,7 @@ RUN git clone https://github.com/foundation-model-stack/fms-model-optimizer.git
 
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-  --mount=type=bind,source=notorch.txt,target=notorch.txt \ 
+  --mount=type=bind,source=notorch.txt,target=notorch.txt \
   uv pip install --override notorch.txt ./foundation-model-stack  && \
   uv pip install --override notorch.txt ./fms-model-optimizer
 
@@ -97,17 +97,10 @@ RUN dnf install -y gcc && \
 COPY LICENSE /licenses/vllm.md
 COPY examples/*.jinja /app/data/template/
 
-
-
-
-
 # Install vllm
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install https://github.com/neuralmagic/nm-cicd/actions/runs/15620305400/artifacts/3317735622 \
     https://github.com/neuralmagic/nm-cicd/actions/runs/15615983446/artifacts/3316147083
-
-
-
 
 ENV HF_HUB_OFFLINE=1 \
     HOME=/home/vllm \
