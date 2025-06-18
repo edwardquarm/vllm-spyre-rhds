@@ -1,0 +1,141 @@
+ARG PYTHON_VERSION=3.12
+
+
+ARG RELEASE_TARGET="dd2"
+ARG RELEASE_ARCH="x86"
+
+## Base Layer ##################################################################
+FROM quay.io/ibm-aiu/base:2025_05_29.amd64 as base
+ARG PYTHON_VERSION
+ENV PYTHON_VERSION=${PYTHON_VERSION}
+
+USER root
+
+RUN dnf install -y \
+    python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel \
+    && dnf clean all
+
+WORKDIR /workspace
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# Some utils for dev purposes - tar required for kubectl cp
+RUN dnf install -y \
+        which procps findutils tar \
+    && dnf clean all
+
+## Python Installer ############################################################
+FROM base AS python-install
+ARG PYTHON_VERSION
+
+ENV VIRTUAL_ENV=/opt/vllm
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV PYTHON_VERSION=${PYTHON_VERSION}
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_PREFERENCE=only-system \
+    UV_PROJECT_ENVIRONMENT=/opt/vllm
+
+USER root
+
+RUN dnf install -y \
+    python${PYTHON_VERSION}-devel  && \
+    pip3 install --no-cache -U pip wheel uv && \
+    dnf clean all
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv venv "${VIRTUAL_ENV}" --seed --system-site-packages
+
+WORKDIR /workspace
+
+RUN git clone https://github.com/foundation-model-stack/foundation-model-stack.git
+RUN git clone https://github.com/foundation-model-stack/fms-model-optimizer.git
+
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+  --mount=type=bind,source=notorch.txt,target=notorch.txt \ 
+  uv pip install --override notorch.txt ./foundation-model-stack  && \
+  uv pip install --override notorch.txt ./fms-model-optimizer
+
+
+# install common dependencies
+#UN --mount=type=cache,target=/root/.cache/uv \
+ #  #-mount=type=bind,source=requirements/common.txt,target=requirements/common.txt \
+  # --mount=type=bind,source=notorch.txt,target=requirements/constraints/notorch.txt \ 
+   #uv pip install --override requirements/constraints/notorch.txt 
+        #r requirements/common.txt
+
+
+FROM python-install AS vllm-openai
+
+# more spyre stuff
+ENV COMPILATION_MODE=offline_decoder \
+    DTLOG_LEVEL=error \
+    DT_OPT=varsub=1,lxopt=1,opfusion=1,arithfold=1,dataopt=1,patchinit=1,patchprog=1,autopilot=1,weipreload=0,kvcacheopt=1,progshareopt=1,dtversion=2 \
+    FLEX_COMPUTE=SENTIENT \
+    FLEX_DEVICE=VFIO \
+    FLEX_OVERWRITE_NMB_FRAME=1 \
+    TOKENIZERS_PARALLELISM=false \
+    TORCH_SENDNN_LOG=CRITICAL
+
+ARG PYTHON_VERSION
+
+WORKDIR /workspace
+
+ENV VIRTUAL_ENV=/opt/vllm
+ENV PATH=$VIRTUAL_ENV/bin:$PATH
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_PREFERENCE=only-system \
+    UV_PROJECT_ENVIRONMENT=/opt/vllm
+
+# Triton needs a CC compiler
+RUN dnf install -y gcc && \
+    dnf clean all
+
+COPY LICENSE /licenses/vllm.md
+COPY examples/*.jinja /app/data/template/
+
+
+
+
+
+# Install vllm
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install https://github.com/neuralmagic/nm-cicd/actions/runs/15620305400/artifacts/3317735622 \
+    https://github.com/neuralmagic/nm-cicd/actions/runs/15615983446/artifacts/3316147083
+
+
+
+
+ENV HF_HUB_OFFLINE=1 \
+    HOME=/home/vllm \
+    # Allow requested max length to exceed what is extracted from the
+    # config.json
+    # see: https://github.com/vllm-project/vllm/pull/7080
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    VLLM_USAGE_SOURCE=production-docker-image \
+    VLLM_WORKER_MULTIPROC_METHOD=fork \
+    VLLM_NO_USAGE_STATS=1 \
+    OUTLINES_CACHE_DIR=/tmp/outlines \
+    NUMBA_CACHE_DIR=/tmp/numba \
+    TRITON_CACHE_DIR=/tmp/triton \
+    VLLM_PLUGINS="spyre" \
+    MASTER_ADDR=localhost \
+    MASTER_PORT=12355 \
+    VLLM_USE_V1=1
+
+# setup non-root user for OpenShift
+RUN umask 002 && \
+    useradd --uid 2000 --gid 0 vllm && \
+    mkdir -p /home/vllm && \
+    chmod g+rwx /home/vllm
+
+USER 2000
+WORKDIR /home/vllm
+
+COPY .senlib.json /home/vllm/.senlib.json
+COPY spyre_entrypoint.sh /opt/vllm/bin/spyre_entrypoint.sh
+
+ENTRYPOINT ["/opt/vllm/bin/spyre_entrypoint.sh"]
