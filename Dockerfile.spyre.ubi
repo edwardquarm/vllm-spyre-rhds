@@ -100,7 +100,7 @@ COPY examples/*.jinja /app/data/template/
 # Install vllm
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install https://github.com/neuralmagic/nm-cicd/actions/runs/15620305400/artifacts/3317735622 \
-    https://github.com/neuralmagic/nm-cicd/actions/runs/15615983446/artifacts/3316147083
+    "https://storage.googleapis.com/neuralmagic-public-pypi/dist/vllm_spyre-0.3.1-py3-none-any.whl"
 
 ENV HF_HUB_OFFLINE=1 \
     HOME=/home/vllm \
