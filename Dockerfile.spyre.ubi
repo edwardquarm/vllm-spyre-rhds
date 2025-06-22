@@ -124,8 +124,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # setup non-root user for OpenShift
 RUN umask 002 && \
     useradd --uid 2000 --gid 0 vllm && \
-    mkdir -p /home/vllm && \
-    chmod g+rwx /home/vllm
+    mkdir -p /home/vllm/.cache/flashinfer && \
+    chown -R 2000:0 /home/vllm && \
+    chmod -R g+rwX /home/vllm
 
 
 COPY .senlib.json /home/vllm/.senlib.json
